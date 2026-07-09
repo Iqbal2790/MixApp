@@ -1,32 +1,32 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Play, Pause, SkipForward, Volume2, Plus } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Play, Pause, SkipForward, SkipBack } from 'lucide-react';
 import type { DropResult } from '@hello-pangea/dnd';
 import type { Song } from './types';
 import { extractVideoId, generateId, formatTime } from './utils';
 import { DualPlayer } from './components/DualPlayer';
+import type { DualPlayerRef } from './components/DualPlayer';
 import { QueuePanel } from './components/QueuePanel';
-import './App.css';
 
 function App() {
   const [queue, setQueue] = useState<Song[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [masterVolume, setMasterVolume] = useState(100);
   const [inputUrl, setInputUrl] = useState('');
+  const [progress, setProgress] = useState({ currentTime: 0, duration: 0 });
   
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(1);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [crossfadeDuration, setCrossfadeDuration] = useState(5);
+  
+  const playerRef = useRef<DualPlayerRef>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('mixapp_queue');
-    if (saved) {
-      try {
-        setQueue(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse queue from local storage", e);
-      }
+    const savedQueue = localStorage.getItem('mixapp_queue');
+    if (savedQueue) {
+      try { setQueue(JSON.parse(savedQueue)); } catch (e) { console.error(e); }
     }
+    const savedTheme = localStorage.getItem('mixapp_theme') as 'light' | 'dark';
+    if (savedTheme) setTheme(savedTheme);
   }, []);
 
   // Save to localStorage when queue changes
@@ -34,16 +34,21 @@ function App() {
     localStorage.setItem('mixapp_queue', JSON.stringify(queue));
   }, [queue]);
 
+  // Apply theme
+  useEffect(() => {
+    document.body.setAttribute('data-theme', theme);
+    localStorage.setItem('mixapp_theme', theme);
+  }, [theme]);
+
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
       if (e.code === 'Space') {
         e.preventDefault();
         setIsPlaying(prev => !prev);
-      } else if (e.code === 'ArrowRight' && e.ctrlKey) {
+      } else if (e.code === 'ArrowRight') { // removed ctrlKey requirement per ui-design.html
         e.preventDefault();
         handleNext();
       }
@@ -61,7 +66,6 @@ function App() {
     }
 
     try {
-      // Fetch metadata using noembed
       const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
       const data = await res.json();
       
@@ -77,7 +81,6 @@ function App() {
       setQueue(prev => [...prev, newSong]);
       setInputUrl('');
       
-      // Auto play if it's the first song
       if (queue.length === 0) {
         setIsPlaying(true);
       }
@@ -87,12 +90,28 @@ function App() {
     }
   };
 
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!progress.duration || !playerRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, clickX / rect.width));
+    playerRef.current.seekTo(ratio * progress.duration);
+  };
+
   const handleNext = useCallback(() => {
+    if (playerRef.current) playerRef.current.manualSkip();
+  }, []);
+
+  const handlePrev = useCallback(() => {
+    if (currentIndex > 0) setCurrentIndex(currentIndex - 1);
+  }, [currentIndex]);
+
+  const handleNextActual = useCallback(() => {
     if (currentIndex < queue.length - 1) {
       setCurrentIndex(prev => prev + 1);
     } else {
       setIsPlaying(false);
-      setCurrentIndex(0); // Reset to start or just stop
+      setCurrentIndex(0);
     }
   }, [currentIndex, queue.length]);
 
@@ -102,7 +121,6 @@ function App() {
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
     
-    // Adjust currentIndex if necessary
     if (result.source.index === currentIndex) {
       setCurrentIndex(result.destination.index);
     } else if (result.source.index < currentIndex && result.destination.index >= currentIndex) {
@@ -117,114 +135,39 @@ function App() {
   const currentSong = queue[currentIndex];
 
   return (
-    <div className="app-container">
-      {/* LEFT: Player Section */}
-      <section className="player-section glass-panel">
-        <div className="header">
-          <h1>MixApp</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>YouTube Music Mixer</p>
-        </div>
-
-        <div className="main-player-ui">
-          <div className="thumbnail-container">
-            {currentSong ? (
-              <img src={currentSong.thumbnail} alt={currentSong.title} />
-            ) : (
-              <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
-                No song playing
-              </div>
-            )}
-          </div>
-          
-          <div className="song-info">
-            <h2>{currentSong ? currentSong.title : 'Ready to Mix'}</h2>
-            <p>{currentSong ? 'Playing' : 'Add a song to start'}</p>
-          </div>
-
-          <div className="progress-container">
-            <div className="progress-bar" onClick={() => {
-              // Not implementing seeking for now due to dual player complexity, but UI is there
-            }}>
-              <div className="progress-fill" style={{ width: `${(currentTime / duration) * 100}%` }}></div>
-            </div>
-            <div className="time-info">
-              <span>{formatTime(currentTime)}</span>
-              <span>{formatTime(duration)}</span>
-            </div>
-          </div>
-
-          <div className="controls">
+    <>
+      <div className="app">
+        <header>
+          <div className="wordmark"><span className="dot"></span>Mixtape</div>
+          <div className="theme-toggle" role="group" aria-label="Tema tampilan">
             <button 
-              className="btn-icon" 
-              style={{ borderRadius: '50%' }}
-              onClick={() => {
-                if (currentIndex > 0) setCurrentIndex(currentIndex - 1);
-              }}
-              disabled={!currentSong || currentIndex === 0}
-            >
-              <SkipForward size={24} style={{ transform: 'rotate(180deg)' }} />
-            </button>
-            
+              type="button" 
+              data-theme-choice="light" 
+              aria-pressed={theme === 'light'}
+              onClick={() => setTheme('light')}
+            >Light</button>
             <button 
-              className="btn-play btn" 
-              onClick={() => setIsPlaying(!isPlaying)}
-              disabled={!currentSong}
-            >
-              {isPlaying ? <Pause size={32} /> : <Play size={32} style={{ marginLeft: '4px' }} />}
-            </button>
-            
-            <button 
-              className="btn-icon"
-              style={{ borderRadius: '50%' }}
-              onClick={handleNext}
-              disabled={!currentSong || currentIndex >= queue.length - 1}
-            >
-              <SkipForward size={24} />
-            </button>
+              type="button" 
+              data-theme-choice="dark" 
+              aria-pressed={theme === 'dark'}
+              onClick={() => setTheme('dark')}
+            >Dark</button>
           </div>
+        </header>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', width: '100%', maxWidth: '300px', marginTop: '1rem' }}>
-            <Volume2 size={20} color="var(--text-secondary)" />
+        <section>
+          <div className="section-label">Tambah lagu</div>
+          <form className="add-track" onSubmit={handleAddSong}>
             <input 
-              type="range" 
-              min="0" 
-              max="100" 
-              value={masterVolume}
-              onChange={(e) => setMasterVolume(Number(e.target.value))}
-              style={{ flex: 1, accentColor: 'var(--accent-color)' }}
+              type="text" 
+              placeholder="Tempel link YouTube di sini…" 
+              value={inputUrl}
+              onChange={(e) => setInputUrl(e.target.value)}
+              required
             />
-          </div>
-        </div>
-
-        <DualPlayer 
-          queue={queue}
-          currentIndex={currentIndex}
-          isPlaying={isPlaying}
-          masterVolume={masterVolume}
-          onNext={handleNext}
-          onProgress={(t, d) => {
-            setCurrentTime(t);
-            setDuration(d);
-          }}
-        />
-      </section>
-
-      {/* RIGHT: Queue Section */}
-      <section className="queue-section glass-panel" style={{ padding: '1.5rem' }}>
-        <h3 style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--panel-border)', paddingBottom: '0.75rem' }}>Up Next</h3>
-        
-        <form onSubmit={handleAddSong} className="add-song-form">
-          <input 
-            type="text" 
-            placeholder="Paste YouTube Link..." 
-            value={inputUrl}
-            onChange={(e) => setInputUrl(e.target.value)}
-            required
-          />
-          <button type="submit" className="btn" style={{ padding: '0.75rem' }}>
-            <Plus size={20} />
-          </button>
-        </form>
+            <button type="submit">Tambah</button>
+          </form>
+        </section>
 
         <QueuePanel 
           queue={queue}
@@ -250,8 +193,54 @@ function App() {
             setIsPlaying(true);
           }}
         />
-      </section>
-    </div>
+      </div>
+
+      <div className="player-bar">
+        <div className="player-inner">
+          <div className="now-playing"><strong>{currentSong ? currentSong.title : 'Belum ada lagu'}</strong></div>
+          <div className="transport">
+            <button className="transport-btn" aria-label="Lagu sebelumnya" onClick={handlePrev} disabled={!currentSong || currentIndex === 0}>
+              <SkipBack size={24} />
+            </button>
+            <button className="transport-btn play" aria-label="Play/Pause" onClick={() => setIsPlaying(!isPlaying)} disabled={!currentSong}>
+              {isPlaying ? <Pause size={24} /> : <Play size={24} style={{ marginLeft: '4px' }} />}
+            </button>
+            <button className="transport-btn" aria-label="Lagu berikutnya" onClick={handleNext} disabled={!currentSong || currentIndex >= queue.length - 1}>
+              <SkipForward size={24} />
+            </button>
+            
+            <div className="crossfade-track" aria-label="Progress lagu" onClick={handleSeek} style={{ cursor: 'pointer' }}>
+              <div className="fill-a" style={{ width: `${progress.duration > 0 ? (progress.currentTime / progress.duration) * 100 : 0}%` }}></div>
+            </div>
+            
+            <div className="time-info" style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+              {formatTime(progress.currentTime)} / {formatTime(progress.duration)}
+            </div>
+            
+            <div className="crossfade-duration">
+              Crossfade
+              <select value={crossfadeDuration} onChange={(e) => setCrossfadeDuration(Number(e.target.value))}>
+                <option value={3}>3s</option>
+                <option value={5}>5s</option>
+                <option value={8}>8s</option>
+              </select>
+            </div>
+          </div>
+          <div className="shortcut-hint"><kbd>Space</kbd> play/pause · <kbd>→</kbd> lagu berikutnya</div>
+        </div>
+      </div>
+
+      <DualPlayer 
+        ref={playerRef}
+        queue={queue}
+        currentIndex={currentIndex}
+        isPlaying={isPlaying}
+        masterVolume={100}
+        onNext={handleNextActual}
+        onProgress={(currentTime, duration) => setProgress({ currentTime, duration })}
+        crossfadeDuration={crossfadeDuration}
+      />
+    </>
   );
 }
 

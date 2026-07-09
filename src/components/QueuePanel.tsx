@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
-import { Trash2, GripVertical } from 'lucide-react';
+import { Trash2, Scissors } from 'lucide-react';
 import type { Song } from '../types';
+import { formatTime } from '../utils';
 
 interface QueuePanelProps {
   queue: Song[];
@@ -14,66 +15,97 @@ interface QueuePanelProps {
 }
 
 export const QueuePanel: React.FC<QueuePanelProps> = ({ queue, currentIndex, onDragEnd, onRemove, onUpdateSong, onPlaySong }) => {
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  const toggleTrim = (index: number) => {
+    setExpandedIndex(prev => (prev === index ? null : index));
+  };
+
   return (
-    <div className="queue-list-container">
+    <div className={`queue-wrap ${queue.length === 0 ? 'is-empty' : ''}`}>
+      <div className="section-label">Antrian</div>
+      
       <DragDropContext onDragEnd={onDragEnd}>
         <Droppable droppableId="queue-list">
           {(provided) => (
-            <div {...provided.droppableProps} ref={provided.innerRef} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {queue.map((song, index) => (
-                <Draggable key={song.id} draggableId={song.id} index={index}>
-                  {(provided) => (
-                    <div
-                      ref={provided.innerRef}
-                      {...provided.draggableProps}
-                      className={`queue-item ${index === currentIndex ? 'active' : ''}`}
-                    >
-                      <div {...provided.dragHandleProps} className="drag-handle">
-                        <GripVertical size={16} />
-                      </div>
-                      
-                      <img src={song.thumbnail} alt={song.title} className="queue-item-thumb" onClick={() => onPlaySong(index)} style={{ cursor: 'pointer' }} />
-                      
-                      <div className="queue-item-info">
-                        <h4 onClick={() => onPlaySong(index)} style={{ cursor: 'pointer' }}>{song.title}</h4>
-                        <div className="trim-controls">
-                          <input
-                            type="number"
-                            className="trim-input"
-                            placeholder="Start (s)"
-                            value={song.startTime || ''}
-                            onChange={(e) => onUpdateSong(index, { startTime: Number(e.target.value) || 0 })}
-                            min="0"
-                          />
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>-</span>
-                          <input
-                            type="number"
-                            className="trim-input"
-                            placeholder="End (s)"
-                            value={song.endTime || ''}
-                            onChange={(e) => onUpdateSong(index, { endTime: Number(e.target.value) || 0 })}
-                            min="0"
-                          />
-                        </div>
-                      </div>
+            <div className="queue" {...provided.droppableProps} ref={provided.innerRef}>
+              {queue.map((song, index) => {
+                const isPlaying = index === currentIndex;
+                const isExpanded = index === expandedIndex;
+                
+                return (
+                  <Draggable key={song.id} draggableId={song.id} index={index}>
+                    {(provided) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        style={{ ...provided.draggableProps.style, display: 'block', borderBottom: '1px solid var(--border)' }}
+                      >
+                        <div className={`track ${isPlaying ? 'playing' : ''}`}>
+                          <div {...provided.dragHandleProps} className="track-index" style={{ cursor: 'grab' }}>
+                            {index + 1}
+                          </div>
+                          
+                          <div className="track-main" onClick={() => onPlaySong(index)} style={{ cursor: 'pointer' }}>
+                            <div className="track-title">{song.title}</div>
+                            <div className="track-meta">
+                              {song.startTime > 0 || song.endTime > 0 ? (
+                                <span>Trim: {formatTime(song.startTime)} - {song.endTime > 0 ? formatTime(song.endTime) : 'End'}</span>
+                              ) : (
+                                <span>Lagu penuh</span>
+                              )}
+                              {isPlaying && <span>· sedang diputar</span>}
+                            </div>
+                          </div>
 
-                      <button className="btn-remove" onClick={() => onRemove(index)} title="Remove from queue">
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  )}
-                </Draggable>
-              ))}
+                          <div className="track-actions">
+                            <button className="icon-btn" onClick={() => toggleTrim(index)} title="Atur trim" aria-label="Atur trim">
+                              <Scissors size={16} />
+                            </button>
+                            <button className="icon-btn" onClick={() => onRemove(index)} title="Hapus" aria-label="Hapus dari antrian">
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                        
+                        {isExpanded && (
+                          <div className="trim-panel" style={{ display: 'block', borderBottom: 'none' }}>
+                            <div className="trim-row" style={{ marginBottom: '0.5rem' }}>
+                              <span>Mulai (detik)</span>
+                              <input 
+                                type="number" 
+                                min="0" 
+                                value={song.startTime || ''}
+                                onChange={(e) => onUpdateSong(index, { startTime: Number(e.target.value) || 0 })}
+                                style={{ flex: 1, background: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--text)', padding: '2px 6px', borderRadius: '4px' }}
+                              />
+                            </div>
+                            <div className="trim-row">
+                              <span>Selesai (detik)</span>
+                              <input 
+                                type="number" 
+                                min="0" 
+                                value={song.endTime || ''}
+                                onChange={(e) => onUpdateSong(index, { endTime: Number(e.target.value) || 0 })}
+                                style={{ flex: 1, background: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--text)', padding: '2px 6px', borderRadius: '4px' }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Draggable>
+                );
+              })}
               {provided.placeholder}
             </div>
           )}
         </Droppable>
       </DragDropContext>
-      {queue.length === 0 && (
-        <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem 0' }}>
-          Queue is empty. Add a YouTube link!
-        </div>
-      )}
+
+      <div className="empty-state">
+        Antrian masih kosong. Tempel link YouTube di atas buat mulai nyusun mixtape kamu.
+      </div>
     </div>
   );
 };

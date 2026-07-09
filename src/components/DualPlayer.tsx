@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import YouTube from 'react-youtube';
 import type { Song } from '../types';
 
@@ -9,12 +9,42 @@ interface DualPlayerProps {
   masterVolume: number; // 0 to 100
   onNext: () => void;
   onProgress: (time: number, duration: number) => void;
+  crossfadeDuration: number;
 }
 
-const CROSSFADE_DURATION = 5; // seconds
+export interface DualPlayerRef {
+  manualSkip: () => void;
+  seekTo: (time: number) => void;
+}
 
-export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isPlaying, masterVolume, onNext, onProgress }) => {
+export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, currentIndex, isPlaying, masterVolume, onNext, onProgress, crossfadeDuration }, ref) => {
+  const [manualCrossfade, setManualCrossfade] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    manualSkip: () => {
+      setManualCrossfade(true);
+    },
+    seekTo: (time: number) => {
+      const active = activePlayerRef.current === 'A' ? playerARef.current : playerBRef.current;
+      if (active) active.seekTo(time, true);
+    }
+  }));
   const [activePlayer, setActivePlayer] = useState<'A' | 'B'>('A');
+  const activePlayerRef = useRef(activePlayer);
+  const isPlayingRef = useRef(isPlaying);
+
+  useEffect(() => { activePlayerRef.current = activePlayer; }, [activePlayer]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  
+  const onNextRef = useRef(onNext);
+  const onProgressRef = useRef(onProgress);
+  const masterVolumeRef = useRef(masterVolume);
+  const crossfadeDurationRef = useRef(crossfadeDuration);
+
+  useEffect(() => { onNextRef.current = onNext; }, [onNext]);
+  useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
+  useEffect(() => { masterVolumeRef.current = masterVolume; }, [masterVolume]);
+  useEffect(() => { crossfadeDurationRef.current = crossfadeDuration; }, [crossfadeDuration]);
   
   const playerARef = useRef<any>(null);
   const playerBRef = useRef<any>(null);
@@ -22,8 +52,11 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
   const currentSong = queue[currentIndex];
   const nextSong = queue[currentIndex + 1]; // Can be undefined
 
-  const [songA, setSongA] = useState<Song | null>(currentSong || null);
-  const [songB, setSongB] = useState<Song | null>(null);
+  const [songAId, setSongAId] = useState<string | null>(currentSong?.id || null);
+  const [songBId, setSongBId] = useState<string | null>(null);
+
+  const songA = queue.find(s => s.id === songAId) || null;
+  const songB = queue.find(s => s.id === songBId) || null;
 
   const crossfadeIntervalRef = useRef<number | null>(null);
 
@@ -31,39 +64,38 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
   useEffect(() => {
     if (!currentSong) return;
 
-    // Which player should we use for the newly selected currentSong?
-    // If songA is the current song, player A is active.
-    // If not, we switch active player.
+    const A_is_current = songAId === currentSong.id;
+    const B_is_current = songBId === currentSong.id;
+
     if (activePlayer === 'A') {
-      if (songA?.id !== currentSong.id) {
-        setSongA(currentSong);
-        if (playerARef.current) {
-          playerARef.current.loadVideoById(currentSong.videoId, currentSong.startTime || 0);
-        }
-      }
-      if (nextSong && songB?.id !== nextSong.id) {
-        setSongB(nextSong);
-        if (playerBRef.current) {
-          // Preload
-          playerBRef.current.cueVideoById(nextSong.videoId, nextSong.startTime || 0);
-        }
+      if (B_is_current) {
+        // User manually skipped to the next song which was preloaded in B
+        setActivePlayer('B');
+        if (nextSong && songAId !== nextSong.id) setSongAId(nextSong.id);
+      } else if (!A_is_current) {
+        // Not in A, not in B.
+        setSongAId(currentSong.id);
+        if (nextSong && songBId !== nextSong.id) setSongBId(nextSong.id);
+      } else {
+        // A is already currentSong. Just update B.
+        if (nextSong && songBId !== nextSong.id) setSongBId(nextSong.id);
       }
     } else {
-      if (songB?.id !== currentSong.id) {
-        setSongB(currentSong);
-        if (playerBRef.current) {
-          playerBRef.current.loadVideoById(currentSong.videoId, currentSong.startTime || 0);
-        }
-      }
-      if (nextSong && songA?.id !== nextSong.id) {
-        setSongA(nextSong);
-        if (playerARef.current) {
-          // Preload
-          playerARef.current.cueVideoById(nextSong.videoId, nextSong.startTime || 0);
-        }
+      // activePlayer === 'B'
+      if (A_is_current) {
+        // User manually skipped to the next song which was preloaded in A
+        setActivePlayer('A');
+        if (nextSong && songBId !== nextSong.id) setSongBId(nextSong.id);
+      } else if (!B_is_current) {
+        // Not in B, not in A.
+        setSongBId(currentSong.id);
+        if (nextSong && songAId !== nextSong.id) setSongAId(nextSong.id);
+      } else {
+        // B is already currentSong. Just update A.
+        if (nextSong && songAId !== nextSong.id) setSongAId(nextSong.id);
       }
     }
-  }, [currentIndex, currentSong, nextSong]);
+  }, [currentIndex, currentSong, nextSong, activePlayer, songAId, songBId]);
 
   // Play/Pause effect
   useEffect(() => {
@@ -71,8 +103,13 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
     const pB = playerBRef.current;
     
     if (isPlaying) {
-      if (activePlayer === 'A' && pA && pA.getPlayerState() !== 1) pA.playVideo();
-      if (activePlayer === 'B' && pB && pB.getPlayerState() !== 1) pB.playVideo();
+      if (activePlayer === 'A') {
+        if (pA && pA.getPlayerState() !== 1) pA.playVideo();
+        if (pB && pB.getPlayerState() === 1) pB.pauseVideo();
+      } else {
+        if (pB && pB.getPlayerState() !== 1) pB.playVideo();
+        if (pA && pA.getPlayerState() === 1) pA.pauseVideo();
+      }
     } else {
       if (pA && pA.getPlayerState() === 1) pA.pauseVideo();
       if (pB && pB.getPlayerState() === 1) pB.pauseVideo();
@@ -87,6 +124,9 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
       active.setVolume(masterVolume);
     }
   }, [masterVolume, activePlayer]);
+
+  const manualCrossfadeRef = useRef(manualCrossfade);
+  useEffect(() => { manualCrossfadeRef.current = manualCrossfade; }, [manualCrossfade]);
 
   // Crossfade check loop
   useEffect(() => {
@@ -105,13 +145,21 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
         const duration = active.getDuration() || 0;
         const endTime = activeSong.endTime > 0 ? activeSong.endTime : duration;
         
-        onProgress(currentTime, endTime || duration || 1);
+        // Enforce startTime (if user seeks before it or just loaded)
+        if (activeSong.startTime > 0 && currentTime < activeSong.startTime - 0.5) {
+          active.seekTo(activeSong.startTime, true);
+        }
+
+        onProgressRef.current(currentTime, endTime || duration || 1);
 
         const timeLeft = endTime - currentTime;
 
-        // Trigger crossfade when approaching end time
-        if (timeLeft <= CROSSFADE_DURATION && timeLeft > 0 && inactiveSong && !crossfading) {
+        const shouldCrossfade = timeLeft <= crossfadeDurationRef.current || manualCrossfadeRef.current;
+
+        // Trigger crossfade when approaching end time or manual skip
+        if (shouldCrossfade && timeLeft > 0 && inactiveSong && !crossfading) {
           crossfading = true;
+          if (manualCrossfadeRef.current) setManualCrossfade(false);
           
           if (inactive) {
             inactive.setVolume(0);
@@ -121,28 +169,31 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
             const fadeStart = Date.now();
             const fadeInterval = window.setInterval(() => {
               const elapsed = (Date.now() - fadeStart) / 1000;
-              let ratio = elapsed / CROSSFADE_DURATION;
+              let ratio = elapsed / crossfadeDurationRef.current;
+              
               if (ratio >= 1) {
                 ratio = 1;
                 window.clearInterval(fadeInterval);
+                crossfadeIntervalRef.current = null;
                 // Switch players
                 setActivePlayer(activePlayer === 'A' ? 'B' : 'A');
                 active.pauseVideo();
                 crossfading = false;
-                onNext();
+                onNextRef.current();
               }
               
-              active.setVolume((1 - ratio) * masterVolume);
-              inactive.setVolume(ratio * masterVolume);
+              active.setVolume((1 - ratio) * masterVolumeRef.current);
+              inactive.setVolume(ratio * masterVolumeRef.current);
             }, 50);
             
             crossfadeIntervalRef.current = fadeInterval;
           }
         }
 
-        // If no next song, just stop at end
-        if (timeLeft <= 0 && !inactiveSong && !crossfading) {
-           onNext();
+        // If no next song, just stop at end (or if skipped and no next song)
+        if ((timeLeft <= 0 || manualCrossfadeRef.current) && !inactiveSong && !crossfading) {
+           if (manualCrossfadeRef.current) setManualCrossfade(false);
+           onNextRef.current();
         }
       }
 
@@ -158,9 +209,9 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
         crossfadeIntervalRef.current = null;
       }
     };
-  }, [activePlayer, isPlaying, songA, songB, masterVolume, onNext, onProgress]);
+  }, [activePlayer, isPlaying, songA, songB]);
 
-  const opts = {
+  const getOpts = (song: Song | null) => ({
     height: '0',
     width: '0',
     playerVars: {
@@ -168,7 +219,14 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
       controls: 0,
       disablekb: 1,
       modestbranding: 1,
+      start: song?.startTime || undefined,
     },
+  });
+
+  const handleStateChange = (player: 'A' | 'B', e: any) => {
+    if (activePlayerRef.current === player && isPlayingRef.current && (e.data === 5 || e.data === -1)) {
+      e.target.playVideo();
+    }
   };
 
   return (
@@ -176,17 +234,19 @@ export const DualPlayer: React.FC<DualPlayerProps> = ({ queue, currentIndex, isP
       {songA && (
         <YouTube
           videoId={songA.videoId}
-          opts={opts}
+          opts={getOpts(songA)}
           onReady={(e) => { playerARef.current = e.target; e.target.setVolume(activePlayer === 'A' ? masterVolume : 0); }}
+          onStateChange={(e) => handleStateChange('A', e)}
         />
       )}
       {songB && (
         <YouTube
           videoId={songB.videoId}
-          opts={opts}
+          opts={getOpts(songB)}
           onReady={(e) => { playerBRef.current = e.target; e.target.setVolume(activePlayer === 'B' ? masterVolume : 0); }}
+          onStateChange={(e) => handleStateChange('B', e)}
         />
       )}
     </div>
   );
-};
+});
