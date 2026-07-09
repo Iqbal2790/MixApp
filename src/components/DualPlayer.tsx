@@ -193,12 +193,16 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
                       onNextRef.current();
                     }
                     
-                    active.setVolume((1 - ratio) * masterVolumeRef.current);
-                    inactive.setVolume(ratio * masterVolumeRef.current);
+                    // Equal-power crossfade curve for smoother perceived volume
+                    const fadeOutVol = Math.cos(ratio * 0.5 * Math.PI) * masterVolumeRef.current;
+                    const fadeInVol = Math.sin(ratio * 0.5 * Math.PI) * masterVolumeRef.current;
+                    
+                    active.setVolume(Math.round(fadeOutVol));
+                    inactive.setVolume(Math.round(fadeInVol));
                   } catch (e) {
                     // ignore crossfade interval errors
                   }
-                }, 50);
+                }, 20);
                 
                 crossfadeIntervalRef.current = fadeInterval;
                 crossfading = true;
