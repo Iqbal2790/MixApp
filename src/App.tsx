@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, Pause, SkipForward, SkipBack } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Plus, Trash2 } from 'lucide-react';
 import type { DropResult } from '@hello-pangea/dnd';
 import type { Song } from './types';
 import { extractVideoId, generateId, formatTime } from './utils';
 import { DualPlayer } from './components/DualPlayer';
 import type { DualPlayerRef } from './components/DualPlayer';
 import { QueuePanel } from './components/QueuePanel';
+import { supabase } from './lib/supabase';
+import { Modal } from './components/Modal';
 
 function App() {
   const [queue, setQueue] = useState<Song[]>([]);
@@ -14,17 +16,117 @@ function App() {
   const [inputUrl, setInputUrl] = useState('');
   const [progress, setProgress] = useState({ currentTime: 0, duration: 0 });
   
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<'light'|'dark'>(() => {
+    return (localStorage.getItem('mixapp_theme') as 'light'|'dark') || 'dark';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mixapp_theme', theme);
+  }, [theme]);
   const [crossfadeDuration, setCrossfadeDuration] = useState(5);
+  const [playlistTitle, setPlaylistTitle] = useState('My Mixtape');
+  const [playlistId, setPlaylistId] = useState<string | null>(null);
+  
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    type: 'prompt' | 'confirm';
+    title: string;
+    message?: string;
+    inputValue?: string;
+    onConfirm: (val?: string) => void;
+  }>({
+    isOpen: false,
+    type: 'prompt',
+    title: '',
+    onConfirm: () => {}
+  });
+
+  const closeModal = () => setModalState(prev => ({ ...prev, isOpen: false }));
+  
+  const [library, setLibrary] = useState<{id: string, title: string}[]>([]);
+  const [allSongs, setAllSongs] = useState<Song[]>([]);
+  const [allSongsId, setAllSongsId] = useState<string | null>(null);
   
   const playerRef = useRef<DualPlayerRef>(null);
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    const savedQueue = localStorage.getItem('mixapp_queue');
-    if (savedQueue) {
-      try { setQueue(JSON.parse(savedQueue)); } catch (e) { console.error(e); }
+  const fetchLibrary = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('playlists')
+        .select('id, title')
+        .neq('title', 'Global_All_Songs')
+        .order('created_at', { ascending: false });
+      if (!error && data) setLibrary(data);
+    } catch (err) {
+      console.error(err);
     }
+  };
+
+  // Load from Supabase URL or localStorage on mount
+  useEffect(() => {
+    const loadData = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pId = urlParams.get('p');
+      
+      if (pId) {
+        try {
+          const { data, error } = await supabase
+            .from('playlists')
+            .select('*')
+            .eq('id', pId)
+            .single();
+            
+          if (error) throw error;
+          if (data) {
+            setPlaylistId(pId);
+            setPlaylistTitle(data.title);
+            setQueue(data.songs);
+          }
+        } catch (err) {
+          console.error("Failed to load playlist", err);
+          alert("Gagal memuat playlist dari URL.");
+        }
+      } else {
+        // Fallback to local storage only if no URL param
+        const savedQueue = localStorage.getItem('mixapp_queue');
+        if (savedQueue) {
+          try { setQueue(JSON.parse(savedQueue)); } catch (e) { console.error(e); }
+        }
+      }
+      
+      let localSongs: Song[] = [];
+      const savedAllSongs = localStorage.getItem('mixapp_all_songs');
+      if (savedAllSongs) {
+        try { localSongs = JSON.parse(savedAllSongs); } catch { /* ignore */ }
+      }
+      
+      try {
+        const { data: allData } = await supabase.from('playlists').select('*').eq('title', 'Global_All_Songs');
+        if (allData && allData.length > 0) {
+          allData.sort((a, b) => (b.songs || []).length - (a.songs || []).length);
+          const bestRow = allData[0];
+          
+          if (allData.length > 1) {
+            const others = allData.slice(1).map(d => d.id);
+            supabase.from('playlists').delete().in('id', others).then();
+          }
+          
+          setAllSongsId(bestRow.id);
+          const dbSongs = bestRow.songs || [];
+          setAllSongs(dbSongs.length > 0 ? dbSongs : localSongs);
+        } else {
+          const { data: newData } = await supabase.from('playlists').insert({ title: 'Global_All_Songs', songs: localSongs }).select().single();
+          if (newData) setAllSongsId(newData.id);
+          setAllSongs(localSongs);
+        }
+      } catch (err) {
+        setAllSongs(localSongs);
+        console.error("Failed to sync global songs", err);
+      }
+    };
+    
+    loadData();
+    fetchLibrary();
     const savedTheme = localStorage.getItem('mixapp_theme') as 'light' | 'dark';
     if (savedTheme) setTheme(savedTheme);
   }, []);
@@ -34,11 +136,77 @@ function App() {
     localStorage.setItem('mixapp_queue', JSON.stringify(queue));
   }, [queue]);
 
+  useEffect(() => {
+    localStorage.setItem('mixapp_all_songs', JSON.stringify(allSongs));
+    if (allSongsId) {
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => {
+        supabase.from('playlists').update({ songs: allSongs }).eq('id', allSongsId).abortSignal(abortController.signal).then();
+      }, 1000);
+      return () => {
+        clearTimeout(timeoutId);
+        abortController.abort();
+      };
+    }
+  }, [allSongs, allSongsId]);
+
+  // Auto-save to Supabase
+  useEffect(() => {
+    if (!playlistId && queue.length === 0) return;
+    
+    const abortController = new AbortController();
+    
+    const saveToDb = async () => {
+      try {
+        if (playlistId) {
+          const { error } = await supabase
+            .from('playlists')
+            .update({ songs: queue, title: playlistTitle })
+            .eq('id', playlistId)
+            .abortSignal(abortController.signal);
+          if (error && error.name !== 'AbortError') throw error;
+        } else {
+          const { data, error } = await supabase
+            .from('playlists')
+            .insert([{ title: playlistTitle, songs: queue }])
+            .select()
+            .abortSignal(abortController.signal)
+            .single();
+            
+          if (error && error.name !== 'AbortError') {
+            console.error("Supabase insert error details:", error);
+            alert(`Gagal membuat playlist di database: ${error.message || JSON.stringify(error)}`);
+            return;
+          }
+          if (data) {
+            setPlaylistId(data.id);
+            const url = new URL(window.location.href);
+            url.searchParams.set('p', data.id);
+            window.history.pushState({}, '', url);
+            fetchLibrary(); // Refresh library when new playlist created
+          }
+        }
+      } catch (err: any) {
+        console.error("Auto-save failed", err);
+      }
+    };
+
+    const timeoutId = setTimeout(saveToDb, 1000); // 1s debounce
+    return () => {
+      clearTimeout(timeoutId);
+      abortController.abort();
+    };
+  }, [queue, playlistTitle, playlistId]);
+
   // Apply theme
   useEffect(() => {
     document.body.setAttribute('data-theme', theme);
     localStorage.setItem('mixapp_theme', theme);
   }, [theme]);
+
+  const handleNext = useCallback(() => {
+    if (playerRef.current) playerRef.current.manualSkip();
+  }, []);
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -55,7 +223,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [handleNext]);
 
   const handleAddSong = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,16 +246,136 @@ function App() {
         endTime: 0,
       };
 
-      setQueue(prev => [...prev, newSong]);
+      setAllSongs(prev => [newSong, ...prev]);
+      setQueue(prev => [...prev, { ...newSong, id: generateId() }]);
       setInputUrl('');
       
-      if (queue.length === 0) {
-        setIsPlaying(true);
-      }
     } catch (err) {
       console.error(err);
       alert("Failed to fetch video info");
     }
+  };
+
+  const handleAddFromLibrary = (song: Song) => {
+    setQueue(q => [...q, { ...song, id: generateId() }]);
+    if (queue.length === 0) {
+      setIsPlaying(true);
+    }
+  };
+  
+  const loadPlaylist = async (id: string) => {
+    try {
+      const { data, error } = await supabase.from('playlists').select('*').eq('id', id).single();
+      if (error) throw error;
+      if (data) {
+        setPlaylistId(data.id);
+        setPlaylistTitle(data.title);
+        const seenIds = new Set<string>();
+        const uniqueQueue = (data.songs || []).map((s: Song) => {
+           if (!s.id || seenIds.has(s.id)) {
+              const newId = Math.random().toString(36).substr(2, 9);
+              seenIds.add(newId);
+              return { ...s, id: newId };
+           }
+           seenIds.add(s.id);
+           return s;
+        });
+        setQueue(uniqueQueue);
+        setCurrentIndex(0);
+        setIsPlaying(false);
+        const url = new URL(window.location.href);
+        url.searchParams.set('p', data.id);
+        window.history.pushState({}, '', url);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Gagal memuat playlist.");
+    }
+  };
+
+  const createNewPlaylist = (skipPrompt = false) => {
+    if (skipPrompt) {
+      setPlaylistId(null);
+      setPlaylistTitle('My Mixtape');
+      setQueue([]);
+      setCurrentIndex(0);
+      setIsPlaying(false);
+      const url = new URL(window.location.href);
+      url.searchParams.delete('p');
+      window.history.pushState({}, '', url);
+      return;
+    }
+
+    setModalState({
+      isOpen: true,
+      type: 'prompt',
+      title: 'Masukkan nama playlist baru:',
+      inputValue: 'My Mixtape',
+      onConfirm: async (val) => {
+        const title = (val && val.trim() !== '') ? val.trim() : 'My Mixtape';
+        
+        try {
+          const { data, error } = await supabase
+            .from('playlists')
+            .insert([{ title, songs: [] }])
+            .select()
+            .single();
+            
+          if (error) throw error;
+          
+          if (data) {
+            setPlaylistId(data.id);
+            setPlaylistTitle(data.title);
+            setQueue([]);
+            setCurrentIndex(0);
+            setIsPlaying(false);
+            const url = new URL(window.location.href);
+            url.searchParams.set('p', data.id);
+            window.history.pushState({}, '', url);
+            fetchLibrary();
+          }
+        } catch (err) {
+          console.error(err);
+          alert("Gagal membuat playlist");
+        }
+        
+        closeModal();
+      }
+    });
+  };
+
+  const handleDeletePlaylist = async () => {
+    if (!playlistId) return;
+    
+    setModalState({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Hapus Playlist',
+      message: `Yakin ingin menghapus playlist "${playlistTitle}"?`,
+      onConfirm: async () => {
+        closeModal();
+        try {
+          const { error } = await supabase.from('playlists').delete().eq('id', playlistId);
+          if (error) throw error;
+          
+          createNewPlaylist(true);
+          fetchLibrary();
+        } catch (err) {
+          console.error(err);
+          alert("Gagal menghapus playlist.");
+        }
+      }
+    });
+  };
+
+  const handleShare = async () => {
+    if (queue.length === 0) {
+      alert("Tambahkan lagu dulu!");
+      return;
+    }
+    
+    await navigator.clipboard.writeText(window.location.href);
+    alert("Link playlist sudah disalin ke clipboard! Bagikan ke temanmu.");
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -98,9 +386,7 @@ function App() {
     playerRef.current.seekTo(ratio * progress.duration);
   };
 
-  const handleNext = useCallback(() => {
-    if (playerRef.current) playerRef.current.manualSkip();
-  }, []);
+
 
   const handlePrev = useCallback(() => {
     if (currentIndex > 0) setCurrentIndex(currentIndex - 1);
@@ -136,63 +422,114 @@ function App() {
 
   return (
     <>
-      <div className="app">
-        <header>
-          <div className="wordmark"><span className="dot"></span>Mixtape</div>
-          <div className="theme-toggle" role="group" aria-label="Tema tampilan">
-            <button 
-              type="button" 
-              data-theme-choice="light" 
-              aria-pressed={theme === 'light'}
-              onClick={() => setTheme('light')}
-            >Light</button>
-            <button 
-              type="button" 
-              data-theme-choice="dark" 
-              aria-pressed={theme === 'dark'}
-              onClick={() => setTheme('dark')}
-            >Dark</button>
+      <div className="app-grid">
+        {/* LEFT PANEL: Playlists Library */}
+        <aside className="panel-left">
+          <div className="wordmark"><span className="dot"></span>MixApp</div>
+          
+          <button className="btn-new-playlist" onClick={() => createNewPlaylist(false)}>
+            <Plus size={18} /> Playlist Baru
+          </button>
+          
+          <div className="library-list">
+            <h3 className="section-label">Your Library</h3>
+            {library.map(p => (
+              <div 
+                key={p.id} 
+                className={`library-item ${p.id === playlistId ? 'active' : ''}`}
+                onClick={() => loadPlaylist(p.id)}
+              >
+                {p.title}
+              </div>
+            ))}
+            {library.length === 0 && <div className="empty-text">Belum ada playlist</div>}
           </div>
-        </header>
+        </aside>
 
-        <section>
-          <div className="section-label">Tambah lagu</div>
+        {/* MIDDLE PANEL: Current Playlist */}
+        <main className="panel-middle">
+          <div className="playlist-header-container">
+            <input 
+              type="text" 
+              className="playlist-title-input" 
+              value={playlistTitle} 
+              onChange={(e) => setPlaylistTitle(e.target.value)} 
+              aria-label="Nama Playlist"
+            />
+            <button className="btn-save" onClick={handleShare} disabled={queue.length === 0}>
+              Bagikan Link
+            </button>
+            {playlistId && (
+              <button className="btn-icon text-danger" onClick={handleDeletePlaylist} title="Hapus Playlist">
+                <Trash2 size={18} />
+              </button>
+            )}
+            <div className="theme-toggle" role="group" style={{ marginLeft: '1rem' }}>
+              <button type="button" data-theme-choice="light" aria-pressed={theme === 'light'} onClick={() => setTheme('light')}>Light</button>
+              <button type="button" data-theme-choice="dark" aria-pressed={theme === 'dark'} onClick={() => setTheme('dark')}>Dark</button>
+            </div>
+          </div>
+
+          <QueuePanel 
+            queue={queue}
+            currentIndex={currentIndex}
+            onDragEnd={handleDragEnd}
+            onRemove={(idx) => {
+              setQueue(q => q.filter((_, i) => i !== idx));
+              if (idx < currentIndex) setCurrentIndex(c => c - 1);
+              else if (idx === currentIndex && idx === queue.length - 1) {
+                setCurrentIndex(0);
+                setIsPlaying(false);
+              }
+            }}
+            onUpdateSong={(idx, updates) => {
+              setQueue(q => {
+                const newQ = [...q];
+                newQ[idx] = { ...newQ[idx], ...updates };
+                return newQ;
+              });
+            }}
+            onPlaySong={(idx) => {
+              setCurrentIndex(idx);
+              setIsPlaying(true);
+            }}
+          />
+        </main>
+
+        {/* RIGHT PANEL: All Songs */}
+        <aside className="panel-right">
+          <h3 className="section-label">Semua Lagu</h3>
           <form className="add-track" onSubmit={handleAddSong}>
             <input 
               type="text" 
-              placeholder="Tempel link YouTube di sini…" 
+              placeholder="Link YouTube..." 
               value={inputUrl}
               onChange={(e) => setInputUrl(e.target.value)}
               required
             />
-            <button type="submit">Tambah</button>
+            <button type="submit"><Plus size={18} /></button>
           </form>
-        </section>
 
-        <QueuePanel 
-          queue={queue}
-          currentIndex={currentIndex}
-          onDragEnd={handleDragEnd}
-          onRemove={(idx) => {
-            setQueue(q => q.filter((_, i) => i !== idx));
-            if (idx < currentIndex) setCurrentIndex(c => c - 1);
-            else if (idx === currentIndex && idx === queue.length - 1) {
-              setCurrentIndex(0);
-              setIsPlaying(false);
-            }
-          }}
-          onUpdateSong={(idx, updates) => {
-            setQueue(q => {
-              const newQ = [...q];
-              newQ[idx] = { ...newQ[idx], ...updates };
-              return newQ;
-            });
-          }}
-          onPlaySong={(idx) => {
-            setCurrentIndex(idx);
-            setIsPlaying(true);
-          }}
-        />
+          <div className="all-songs-list">
+            {allSongs.map((song, i) => (
+              <div key={i} className="all-song-item">
+                <img src={song.thumbnail} alt="" className="all-song-thumb" />
+                <div className="all-song-info">
+                  <div className="all-song-title">{song.title}</div>
+                </div>
+                <div className="all-song-actions">
+                  <button className="btn-icon" onClick={() => handleAddFromLibrary(song)} title="Tambahkan ke Playlist Aktif">
+                    <Plus size={18} />
+                  </button>
+                  <button className="btn-icon text-danger" onClick={() => setAllSongs(s => s.filter((_, idx) => idx !== i))} title="Hapus dari Library">
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {allSongs.length === 0 && <div className="empty-text">Tambahkan lagu dari YouTube untuk menyimpannya di koleksi Anda.</div>}
+          </div>
+        </aside>
       </div>
 
       <div className="player-bar">
@@ -239,6 +576,16 @@ function App() {
         onNext={handleNextActual}
         onProgress={(currentTime, duration) => setProgress({ currentTime, duration })}
         crossfadeDuration={crossfadeDuration}
+      />
+      <Modal
+        isOpen={modalState.isOpen}
+        type={modalState.type}
+        title={modalState.title}
+        message={modalState.message}
+        inputValue={modalState.inputValue}
+        onInputChange={(val) => setModalState(prev => ({ ...prev, inputValue: val }))}
+        onConfirm={() => modalState.onConfirm(modalState.inputValue)}
+        onCancel={closeModal}
       />
     </>
   );

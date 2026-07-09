@@ -52,29 +52,54 @@
     transition: background 200ms var(--ease), color 200ms var(--ease);
   }
 
-  .app {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: 2rem 1.5rem 7rem;
-    min-height: 100%;
+  #root {
     display: flex;
     flex-direction: column;
-    gap: 2rem;
+    height: 100vh;
   }
 
-  /* header */
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+  .app-grid {
+    display: grid;
+    grid-template-columns: 250px 1fr 300px;
+    flex: 1;
+    overflow: hidden;
+    background: var(--bg);
   }
+
+  .panel-left, .panel-right {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 1.5rem;
+  }
+  
+  .panel-right {
+    border-right: none;
+    border-left: 1px solid var(--border);
+  }
+
+  .panel-middle {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 2rem;
+    position: relative;
+  }
+
+  header {
+    display: none; /* Moved wordmark and theme to panels */
+  }
+
   .wordmark {
-    font-size: var(--fs-lg);
-    font-weight: 650;
-    letter-spacing: -0.01em;
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    margin-bottom: 2rem;
   }
   .wordmark .dot {
     width: 9px; height: 9px; border-radius: 50%;
@@ -147,6 +172,148 @@
   .add-track button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* section label */
+  .shortcut-hint {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    text-align: right;
+  }
+
+  /* --- NEW STYLES FOR PANELS --- */
+
+  .btn-new-playlist {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 2rem;
+    transition: background 0.2s;
+  }
+  
+  .btn-new-playlist:hover {
+    background: var(--accent-soft);
+  }
+
+  .library-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .library-item {
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .library-item:hover {
+    background: var(--bg-raised);
+    color: var(--text);
+  }
+
+  .library-item.active {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .all-songs-list {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .all-song-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    border-radius: 8px;
+    background: var(--bg-raised);
+  }
+
+  .all-song-thumb {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 4px;
+  }
+
+  .all-song-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .all-song-title {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .all-song-actions {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .btn-icon {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-icon:hover {
+    background: var(--bg-raised);
+    color: var(--text);
+  }
+
+  .btn-icon.text-danger:hover {
+    color: #ff4d4f;
+  }
+
+  .empty-text {
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    text-align: center;
+    margin-top: 1rem;
+  }
+
+  /* Responsive tweaks */
+  @media (max-width: 900px) {
+    .app-grid {
+      grid-template-columns: 1fr;
+      overflow-y: auto;
+    }
+    body {
+      overflow: auto;
+    }
+    .panel-left, .panel-right {
+      border: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-middle {
+      padding-bottom: 150px;
+    }
+  }
+
   .section-label {
     font-size: var(--fs-xs);
     color: var(--text-muted);
@@ -335,21 +502,6 @@
     padding: 3px 6px;
   }
 
-  .shortcut-hint {
-    text-align: center;
-    font-size: var(--fs-xs);
-    color: var(--text-muted);
-    margin-top: 0.5rem;
-  }
-  kbd {
-    font-family: inherit;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-size: 0.75em;
-  }
-
   /* Utility */
   .visually-hidden {
     position: absolute;
@@ -361,3 +513,158 @@
     clip: rect(0, 0, 0, 0);
     border: 0;
   }
+
+  .playlist-header-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .playlist-title-input {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--text-primary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0.25rem 0.5rem;
+    flex: 1;
+    margin-right: 1rem;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  
+  .playlist-title-input:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .playlist-title-input:focus {
+    border-color: var(--primary-color);
+    outline: none;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .btn-save {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: background 0.2s, opacity 0.2s;
+  }
+
+  .btn-save:hover:not(:disabled) {
+    background: var(--primary-hover);
+  }
+
+  .btn-save:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+/* MODAL UI */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(8px);
+}
+.modal-content {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 2rem;
+  border-radius: var(--radius-md);
+  width: 400px;
+  max-width: 90%;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+  animation: modal-pop 0.3s var(--ease);
+}
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-title {
+  margin-top: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+.modal-message {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+.modal-input {
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 1.5rem;
+  font-size: var(--fs-base);
+  outline: none;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  box-sizing: border-box;
+}
+.modal-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+.btn-secondary {
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.6rem 1.25rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.btn-secondary:hover {
+  background: var(--border);
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.btn-primary:hover {
+  filter: brightness(1.1);
+}
+.btn-primary.danger {
+  background: #ef4444;
+  color: #fff;
+}
+.btn-primary.danger:hover {
+  background: #dc2626;
+  filter: none;
+}

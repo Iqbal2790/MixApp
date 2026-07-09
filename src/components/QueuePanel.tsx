@@ -104,7 +104,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({ queue, currentIndex, onD
       </DragDropContext>
 
       <div className="empty-state">
-        Antrian masih kosong. Tempel link YouTube di atas buat mulai nyusun mixtape kamu.
+        Playlist baru masih kosong. Tambahkan lagu dari <strong>Semua Lagu</strong> di panel kanan untuk memulai mixtape kamu!
       </div>
     </div>
   );
