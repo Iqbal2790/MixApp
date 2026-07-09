@@ -268,7 +268,11 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
           key={songA.id}
           videoId={songA.videoId}
           opts={getOpts(songA)}
-          onReady={(e) => { playerARef.current = e.target; e.target.setVolume(activePlayer === 'A' ? masterVolume : 0); }}
+          onReady={(e) => { 
+            playerARef.current = e.target; 
+            e.target.setVolume(activePlayer === 'A' ? masterVolume : 0); 
+            if (activePlayer === 'A' && isPlaying) e.target.playVideo();
+          }}
           onStateChange={(e) => handleStateChange('A', e)}
         />
       )}
@@ -277,7 +281,11 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
           key={songB.id}
           videoId={songB.videoId}
           opts={getOpts(songB)}
-          onReady={(e) => { playerBRef.current = e.target; e.target.setVolume(activePlayer === 'B' ? masterVolume : 0); }}
+          onReady={(e) => { 
+            playerBRef.current = e.target; 
+            e.target.setVolume(activePlayer === 'B' ? masterVolume : 0); 
+            if (activePlayer === 'B' && isPlaying) e.target.playVideo();
+          }}
           onStateChange={(e) => handleStateChange('B', e)}
         />
       )}
