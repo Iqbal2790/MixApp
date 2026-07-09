@@ -23,7 +23,7 @@ function App() {
   useEffect(() => {
     localStorage.setItem('mixapp_theme', theme);
   }, [theme]);
-  const [crossfadeDuration, setCrossfadeDuration] = useState(5);
+  const [crossfadeDuration, setCrossfadeDuration] = useState(3);
   const [playlistTitle, setPlaylistTitle] = useState('My Mixtape');
   const [playlistId, setPlaylistId] = useState<string | null>(null);
   
