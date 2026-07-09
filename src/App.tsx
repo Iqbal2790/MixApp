@@ -80,7 +80,17 @@ function App() {
           if (data) {
             setPlaylistId(pId);
             setPlaylistTitle(data.title);
-            setQueue(data.songs);
+            const seenIds = new Set<string>();
+            const safeQueue = (data.songs || []).map((s: Song) => {
+              if (!s.id || seenIds.has(s.id)) {
+                const newId = Math.random().toString(36).substr(2, 9);
+                seenIds.add(newId);
+                return { ...s, id: newId };
+              }
+              seenIds.add(s.id);
+              return s;
+            });
+            setQueue(safeQueue);
           }
         } catch (err) {
           console.error("Failed to load playlist", err);
@@ -257,10 +267,12 @@ function App() {
   };
 
   const handleAddFromLibrary = (song: Song) => {
-    setQueue(q => [...q, { ...song, id: generateId() }]);
-    if (queue.length === 0) {
-      setIsPlaying(true);
-    }
+    setQueue(q => {
+      if (q.length === 0) {
+        setIsPlaying(true);
+      }
+      return [...q, { ...song, id: generateId() }];
+    });
   };
   
   const loadPlaylist = async (id: string) => {
@@ -475,12 +487,18 @@ function App() {
             currentIndex={currentIndex}
             onDragEnd={handleDragEnd}
             onRemove={(idx) => {
-              setQueue(q => q.filter((_, i) => i !== idx));
-              if (idx < currentIndex) setCurrentIndex(c => c - 1);
-              else if (idx === currentIndex && idx === queue.length - 1) {
-                setCurrentIndex(0);
-                setIsPlaying(false);
-              }
+              setQueue(q => {
+                const newQ = q.filter((_, i) => i !== idx);
+                setCurrentIndex(c => {
+                  if (idx < c) return c - 1;
+                  if (idx === c && idx === q.length - 1) {
+                    setIsPlaying(false);
+                    return 0;
+                  }
+                  return c;
+                });
+                return newQ;
+              });
             }}
             onUpdateSong={(idx, updates) => {
               setQueue(q => {
