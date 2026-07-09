@@ -265,6 +265,7 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
     <div className="visually-hidden">
       {songA && (
         <YouTube
+          key={songA.id}
           videoId={songA.videoId}
           opts={getOpts(songA)}
           onReady={(e) => { playerARef.current = e.target; e.target.setVolume(activePlayer === 'A' ? masterVolume : 0); }}
@@ -273,6 +274,7 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
       )}
       {songB && (
         <YouTube
+          key={songB.id}
           videoId={songB.videoId}
           opts={getOpts(songB)}
           onReady={(e) => { playerBRef.current = e.target; e.target.setVolume(activePlayer === 'B' ? masterVolume : 0); }}
