@@ -25,8 +25,10 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
       setManualCrossfade(true);
     },
     seekTo: (time: number) => {
-      const active = activePlayerRef.current === 'A' ? playerARef.current : playerBRef.current;
-      if (active) active.seekTo(time, true);
+      try {
+        const active = activePlayerRef.current === 'A' ? playerARef.current : playerBRef.current;
+        if (active) active.seekTo(time, true);
+      } catch (e) {}
     }
   }));
   const [activePlayer, setActivePlayer] = useState<'A' | 'B'>('A');
@@ -102,29 +104,36 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
 
   // Play/Pause effect
   useEffect(() => {
-    const pA = playerARef.current;
-    const pB = playerBRef.current;
-    
-    if (isPlaying) {
-      if (activePlayer === 'A') {
-        if (pA && pA.getPlayerState() !== 1) pA.playVideo();
-        if (pB && pB.getPlayerState() === 1) pB.pauseVideo();
+    try {
+      const pA = playerARef.current;
+      const pB = playerBRef.current;
+      
+      if (isPlaying) {
+        if (activePlayer === 'A') {
+          if (pA && pA.getPlayerState() !== 1) pA.playVideo();
+          if (pB && pB.getPlayerState() === 1) pB.pauseVideo();
+        } else {
+          if (pB && pB.getPlayerState() !== 1) pB.playVideo();
+          if (pA && pA.getPlayerState() === 1) pA.pauseVideo();
+        }
       } else {
-        if (pB && pB.getPlayerState() !== 1) pB.playVideo();
         if (pA && pA.getPlayerState() === 1) pA.pauseVideo();
+        if (pB && pB.getPlayerState() === 1) pB.pauseVideo();
       }
-    } else {
-      if (pA && pA.getPlayerState() === 1) pA.pauseVideo();
-      if (pB && pB.getPlayerState() === 1) pB.pauseVideo();
+    } catch (e) {
+      console.warn("YouTube player API error ignored (Play/Pause):", e);
     }
   }, [isPlaying, activePlayer]);
 
   // Master volume effect
   useEffect(() => {
-    // If not in crossfade, set the active player to master volume
-    const active = activePlayer === 'A' ? playerARef.current : playerBRef.current;
-    if (active && !crossfadeIntervalRef.current) {
-      active.setVolume(masterVolume);
+    try {
+      const active = activePlayer === 'A' ? playerARef.current : playerBRef.current;
+      if (active && !crossfadeIntervalRef.current) {
+        active.setVolume(masterVolume);
+      }
+    } catch (e) {
+      console.warn("YouTube player API error ignored (Volume):", e);
     }
   }, [masterVolume, activePlayer]);
 
@@ -137,69 +146,76 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
     let crossfading = false;
 
     const loop = () => {
-      const active = activePlayer === 'A' ? playerARef.current : playerBRef.current;
-      const inactive = activePlayer === 'A' ? playerBRef.current : playerARef.current;
-      
-      const activeSong = activePlayer === 'A' ? songA : songB;
-      const inactiveSong = activePlayer === 'A' ? songB : songA;
-
-      if (active && activeSong && isPlaying) {
-        const currentTime = active.getCurrentTime() || 0;
-        const duration = active.getDuration() || 0;
-        const endTime = activeSong.endTime > 0 ? activeSong.endTime : duration;
+      try {
+        const active = activePlayer === 'A' ? playerARef.current : playerBRef.current;
+        const inactive = activePlayer === 'A' ? playerBRef.current : playerARef.current;
         
-        // Enforce startTime (if user seeks before it or just loaded)
-        if (activeSong.startTime > 0 && currentTime < activeSong.startTime - 0.5) {
-          active.seekTo(activeSong.startTime, true);
-        }
+        const activeSong = activePlayer === 'A' ? songA : songB;
+        const inactiveSong = activePlayer === 'A' ? songB : songA;
 
-        onProgressRef.current(currentTime, endTime || duration || 1);
-
-        const timeLeft = endTime - currentTime;
-
-        const shouldCrossfade = timeLeft <= crossfadeDurationRef.current || manualCrossfadeRef.current;
-
-        // Trigger crossfade when approaching end time or manual skip
-        if (shouldCrossfade && timeLeft > 0 && inactiveSong && !crossfading) {
-          crossfading = true;
-          if (manualCrossfadeRef.current) setManualCrossfade(false);
+        if (active && activeSong && isPlaying) {
+          const currentTime = active.getCurrentTime() || 0;
+          const duration = active.getDuration() || 0;
+          const endTime = activeSong.endTime > 0 ? activeSong.endTime : duration;
           
-          if (inactive) {
-            inactive.setVolume(0);
-            inactive.playVideo();
+          // Enforce startTime (if user seeks before it or just loaded)
+          if (activeSong.startTime > 0 && currentTime < activeSong.startTime - 0.5) {
+            active.seekTo(activeSong.startTime, true);
+          }
+
+          onProgressRef.current(currentTime, endTime || duration || 1);
+
+          const timeLeft = endTime - currentTime;
+
+          const shouldCrossfade = timeLeft <= crossfadeDurationRef.current || manualCrossfadeRef.current;
+
+          // Trigger crossfade when approaching end time or manual skip
+          if (shouldCrossfade && timeLeft > 0 && inactiveSong && !crossfading) {
+            crossfading = true;
+            if (manualCrossfadeRef.current) setManualCrossfade(false);
             
-            // Start fading
-            const fadeStart = Date.now();
-            const fadeInterval = window.setInterval(() => {
-              const elapsed = (Date.now() - fadeStart) / 1000;
-              let ratio = elapsed / crossfadeDurationRef.current;
+            if (inactive) {
+              inactive.setVolume(0);
+              inactive.playVideo();
               
-              if (ratio >= 1) {
-                ratio = 1;
-                window.clearInterval(fadeInterval);
-                crossfadeIntervalRef.current = null;
-                // Switch players
-                setActivePlayer(activePlayer === 'A' ? 'B' : 'A');
-                active.pauseVideo();
-                crossfading = false;
-                onNextRef.current();
-              }
+              // Start fading
+              const fadeStart = Date.now();
+              const fadeInterval = window.setInterval(() => {
+                try {
+                  const elapsed = (Date.now() - fadeStart) / 1000;
+                  let ratio = elapsed / crossfadeDurationRef.current;
+                  
+                  if (ratio >= 1) {
+                    ratio = 1;
+                    window.clearInterval(fadeInterval);
+                    crossfadeIntervalRef.current = null;
+                    // Switch players
+                    setActivePlayer(activePlayer === 'A' ? 'B' : 'A');
+                    active.pauseVideo();
+                    crossfading = false;
+                    onNextRef.current();
+                  }
+                  
+                  active.setVolume((1 - ratio) * masterVolumeRef.current);
+                  inactive.setVolume(ratio * masterVolumeRef.current);
+                } catch (e) {
+                  // ignore crossfade interval errors
+                }
+              }, 50);
               
-              active.setVolume((1 - ratio) * masterVolumeRef.current);
-              inactive.setVolume(ratio * masterVolumeRef.current);
-            }, 50);
-            
-            crossfadeIntervalRef.current = fadeInterval;
+              crossfadeIntervalRef.current = fadeInterval;
+            }
+          }
+
+          // If no next song, just stop at end (or if skipped and no next song)
+          if ((timeLeft <= 0 || manualCrossfadeRef.current) && !inactiveSong && !crossfading) {
+             if (manualCrossfadeRef.current) setManualCrossfade(false);
+             onNextRef.current();
           }
         }
-
-        // If no next song, just stop at end (or if skipped and no next song)
-        if ((timeLeft <= 0 || manualCrossfadeRef.current) && !inactiveSong && !crossfading) {
-           if (manualCrossfadeRef.current) setManualCrossfade(false);
-           onNextRef.current();
-        }
+      } catch (e) {
+        // ignore loop API errors
       }
-
       animationFrame = requestAnimationFrame(loop);
     };
 
@@ -227,8 +243,12 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
   });
 
   const handleStateChange = (player: 'A' | 'B', e: any) => {
-    if (activePlayerRef.current === player && isPlayingRef.current && (e.data === 5 || e.data === -1)) {
-      e.target.playVideo();
+    try {
+      if (activePlayerRef.current === player && isPlayingRef.current && (e.data === 5 || e.data === -1)) {
+        e.target.playVideo();
+      }
+    } catch (e) {
+      // ignore
     }
   };
 
