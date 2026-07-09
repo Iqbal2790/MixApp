@@ -61,6 +61,7 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
   const songB = queue.find(s => s.id === songBId) || null;
 
   const crossfadeIntervalRef = useRef<number | null>(null);
+  const isCrossfadingRef = useRef(false);
 
   // Initialize and switch players
   useEffect(() => {
@@ -190,6 +191,7 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
                       setActivePlayer(activePlayer === 'A' ? 'B' : 'A');
                       active.pauseVideo();
                       crossfading = false;
+                      isCrossfadingRef.current = false;
                       onNextRef.current();
                     }
                     
@@ -206,6 +208,7 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
                 
                 crossfadeIntervalRef.current = fadeInterval;
                 crossfading = true;
+                isCrossfadingRef.current = true;
                 startedFading = true;
                 if (manualCrossfadeRef.current) setManualCrossfade(false);
               } catch (e) {
@@ -255,10 +258,18 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
     },
   });
 
-  const handleStateChange = (player: 'A' | 'B', e: any) => {
+  const handleStateChange = (player: 'A' | 'B', e: any, song: Song | null) => {
     try {
-      if (activePlayerRef.current === player && isPlayingRef.current && (e.data === 5 || e.data === -1)) {
-        e.target.playVideo();
+      if (activePlayerRef.current === player) {
+        if (isPlayingRef.current && (e.data === 5 || e.data === -1)) {
+          e.target.playVideo();
+        }
+      } else {
+        // Pre-buffering: if inactive player starts playing and we are not crossfading, pause it immediately
+        if (!isCrossfadingRef.current && e.data === 1) {
+          e.target.pauseVideo();
+          e.target.seekTo(song?.startTime || 0, true);
+        }
       }
     } catch (e) {
       // ignore
@@ -275,9 +286,9 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
           onReady={(e) => { 
             playerARef.current = e.target; 
             e.target.setVolume(activePlayer === 'A' ? masterVolume : 0); 
-            if (activePlayer === 'A' && isPlaying) e.target.playVideo();
+            if ((activePlayer === 'A' && isPlaying) || activePlayer !== 'A') e.target.playVideo();
           }}
-          onStateChange={(e) => handleStateChange('A', e)}
+          onStateChange={(e) => handleStateChange('A', e, songA)}
         />
       )}
       {songB && (
@@ -288,9 +299,9 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
           onReady={(e) => { 
             playerBRef.current = e.target; 
             e.target.setVolume(activePlayer === 'B' ? masterVolume : 0); 
-            if (activePlayer === 'B' && isPlaying) e.target.playVideo();
+            if ((activePlayer === 'B' && isPlaying) || activePlayer !== 'B') e.target.playVideo();
           }}
-          onStateChange={(e) => handleStateChange('B', e)}
+          onStateChange={(e) => handleStateChange('B', e, songB)}
         />
       )}
     </div>
