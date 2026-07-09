@@ -60,9 +60,6 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
   const songA = queue.find(s => s.id === songAId) || null;
   const songB = queue.find(s => s.id === songBId) || null;
 
-  useEffect(() => { playerARef.current = null; }, [songAId]);
-  useEffect(() => { playerBRef.current = null; }, [songBId]);
-
   const crossfadeIntervalRef = useRef<number | null>(null);
 
   // Initialize and switch players
