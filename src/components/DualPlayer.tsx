@@ -167,40 +167,52 @@ export const DualPlayer = forwardRef<DualPlayerRef, DualPlayerProps>(({ queue, c
           const shouldCrossfade = timeLeft <= crossfadeDurationRef.current || manualCrossfadeRef.current;
 
           // Trigger crossfade when approaching end time or manual skip
-          if (shouldCrossfade && timeLeft > 0 && inactiveSong && !crossfading) {
-            crossfading = true;
-            if (manualCrossfadeRef.current) setManualCrossfade(false);
+          if (shouldCrossfade && inactiveSong && !crossfading) {
+            let startedFading = false;
             
             if (inactive) {
-              inactive.setVolume(0);
-              inactive.playVideo();
-              
-              // Start fading
-              const fadeStart = Date.now();
-              const fadeInterval = window.setInterval(() => {
-                try {
-                  const elapsed = (Date.now() - fadeStart) / 1000;
-                  let ratio = elapsed / crossfadeDurationRef.current;
-                  
-                  if (ratio >= 1) {
-                    ratio = 1;
-                    window.clearInterval(fadeInterval);
-                    crossfadeIntervalRef.current = null;
-                    // Switch players
-                    setActivePlayer(activePlayer === 'A' ? 'B' : 'A');
-                    active.pauseVideo();
-                    crossfading = false;
-                    onNextRef.current();
+              try {
+                inactive.setVolume(0);
+                inactive.playVideo();
+                
+                // Start fading
+                const fadeStart = Date.now();
+                const fadeInterval = window.setInterval(() => {
+                  try {
+                    const elapsed = (Date.now() - fadeStart) / 1000;
+                    let ratio = elapsed / crossfadeDurationRef.current;
+                    
+                    if (ratio >= 1) {
+                      ratio = 1;
+                      window.clearInterval(fadeInterval);
+                      crossfadeIntervalRef.current = null;
+                      // Switch players
+                      setActivePlayer(activePlayer === 'A' ? 'B' : 'A');
+                      active.pauseVideo();
+                      crossfading = false;
+                      onNextRef.current();
+                    }
+                    
+                    active.setVolume((1 - ratio) * masterVolumeRef.current);
+                    inactive.setVolume(ratio * masterVolumeRef.current);
+                  } catch (e) {
+                    // ignore crossfade interval errors
                   }
-                  
-                  active.setVolume((1 - ratio) * masterVolumeRef.current);
-                  inactive.setVolume(ratio * masterVolumeRef.current);
-                } catch (e) {
-                  // ignore crossfade interval errors
-                }
-              }, 50);
-              
-              crossfadeIntervalRef.current = fadeInterval;
+                }, 50);
+                
+                crossfadeIntervalRef.current = fadeInterval;
+                crossfading = true;
+                startedFading = true;
+                if (manualCrossfadeRef.current) setManualCrossfade(false);
+              } catch (e) {
+                // Inactive player not ready yet. 
+              }
+            }
+
+            // Fallback: If we couldn't start fading and we MUST skip now
+            if (!startedFading && (timeLeft <= 0 || manualCrossfadeRef.current)) {
+               if (manualCrossfadeRef.current) setManualCrossfade(false);
+               onNextRef.current();
             }
           }
 
